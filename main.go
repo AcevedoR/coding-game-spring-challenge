@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 /**
  * Auto-generated code below aims at helping you parse
@@ -15,7 +18,9 @@ func main() {
     // heroesPerPlayer: Always 3
     var heroesPerPlayer int
     fmt.Scan(&heroesPerPlayer)
-    
+
+
+
     for {
         for i := 0; i < 2; i++ {
             // health: Each player's base health
@@ -27,9 +32,8 @@ func main() {
         var entityCount int
         fmt.Scan(&entityCount)
         
-		heroes := make([]Actor, 0, 20)
+		heroes := make(map[int]*Hero)
 		monsters := make([]Monster, 0, 20)
-
 
         for i := 0; i < entityCount; i++ {
             // id: Unique identifier
@@ -45,8 +49,12 @@ func main() {
             fmt.Scan(&id, &ttype, &x, &y, &shieldLife, &isControlled, &health, &vx, &vy, &nearBase, &threatFor)
 			actor := Actor{id, ttype, x, y, shieldLife, isControlled, health, vx, vy, nearBase, threatFor}
 			if actor.ttype == 1 {
-				heroes = append(heroes, actor)
-			} 
+				if val, ok := heroes[actor.id]; ok {
+					val.actor = actor
+				} else {
+					heroes[actor.id] = &Hero{actor: actor}
+				}
+			}
 			if actor.ttype == 0  {
 				threat := 0
 				if actor.threatFor == 1 {
@@ -58,38 +66,32 @@ func main() {
 				monsters = append(monsters, Monster{actor, threat})
 			}
         }
-		var target1, target2, target3 Monster
+
         for i := 0; i < len(monsters); i++ {
-			m := monsters[i]
-			if m.threat > target1.threat {
-				target3 = target2
-				target2 = target1
-				target1 = m
-			} else if m.threat > target2.threat {
-				target3 = target2
-				target2 = m
-			} else if m.threat > target3.threat {
-				target3 = m
+			monster := monsters[i]
+			for _, hero := range heroes {
+				if hero.target == nil || monster.threat > hero.target.threat {
+					
+					// fmt.Fprintf(os.Stderr, "hero: %d targeting: %d", hero.actor.id, hero.target.actor.id)
+					hero.target = &monster
+				}
 			}
 		}
-		targets := []Monster{target1, target2, target3}
-
             
 		// fmt.Fprintln(os.Stderr, "Debug messages...")
 		
 		// In the first league: MOVE <x> <y> | WAIT; In later leagues: | SPELL <spellParams>;
 
-		activeHeroes := 0
-		for i := 0; i < len(targets); i++ {
-			t := targets[i]
-			if t.threat != 0 {
-				fmt.Println("MOVE ", t.actor.x, " ", t.actor.y)
-				activeHeroes++ 
+		fmt.Fprintf(os.Stderr, "number of heroes: %d", len(heroes))
+		fmt.Fprintf(os.Stderr, "number of monsters: %d", len(monsters))
+		fmt.Fprintf(os.Stderr, "%+v\n", heroes)
+
+		for _, hero := range heroes {
+			if (hero.target != nil) {
+				fmt.Println("MOVE ", hero.target.actor.x, " ", hero.target.actor.y)
+			} else {
+				fmt.Println("WAIT")
 			}
-		}
-		inactiveHeroes := heroesPerPlayer - activeHeroes 
-		for i := 0; i < inactiveHeroes; i++ {
-			fmt.Println("WAIT")
 		}
 	
     }
@@ -100,4 +102,25 @@ type Actor struct {
 type Monster struct {
 	actor Actor
 	threat int
+}
+type Hero struct {
+	actor Actor
+	target *Monster
+}
+func getAlreadyTargerMonsters(heroes map[int]*Hero) []int{
+	list := make([]int, 0, 10)
+	for _, value := range heroes {
+		if value.target != nil {
+			list = append(list, value.target.actor.id)
+		}
+	}
+	return list
+}
+func contains(list []int, x int) bool {
+	for i := 0; i < len(list); i++ {
+		if x == list[i] {
+			return true
+		}
+	}
+	return false
 }
