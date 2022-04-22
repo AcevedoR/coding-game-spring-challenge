@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 )
 
@@ -60,6 +61,12 @@ func main() {
 						threat += 5
 					}
 				}
+				distanceThreshold := 5000
+				if distance := calculateDistance(baseX, baseY, actor.x, actor.y); distance < distanceThreshold {
+					fmt.Fprintf(os.Stderr, "alert, monster is close %d\n", distance)
+					threat += distanceThreshold - distance
+				}
+				
 				monsters = append(monsters, Monster{actor, threat})
 			}
 		}
@@ -149,4 +156,12 @@ func assignDuty(hero *Hero, position int, baseX int, baseY int) {
 			hero.dutyY = 1500
 		}
 	}
+}
+func calculateDistance(p1X int, p1Y int, p2X int, p2Y int) int {
+	first := PowInt(p2X-p1X, 2)
+	second := PowInt(p2Y-p1Y, 2)
+	return int(math.Round(math.Sqrt(float64(first) + float64(second))))
+}
+func PowInt(x, y int) int {
+    return int(math.Pow(float64(x), float64(y)))
 }
