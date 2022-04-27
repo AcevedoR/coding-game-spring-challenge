@@ -3,37 +3,57 @@ package main
 import (
 	"fmt"
 	"math"
-	"os"
+	"sort"
 )
 
 /**
  * Auto-generated code below aims at helping you parse
  * the standard input according to the problem statement.
  **/
+var maxX = 17630
+var maxY = 9000
+var isBlue bool
+var enemyBaseX, enemyBaseY int
+var patrolState Patrol
 
 func main() {
 	// baseX: The corner of the map representing your base
 	var baseX, baseY int
 	fmt.Scan(&baseX, &baseY)
 
+	isBlue = baseX < (maxY / 2)
+	if isBlue {
+		enemyBaseX = maxX
+		enemyBaseY = maxY
+	} else {
+		enemyBaseX = 0
+		enemyBaseY = 0
+	}
+
 	// heroesPerPlayer: Always 3
 	var heroesPerPlayer int
 	fmt.Scan(&heroesPerPlayer)
 
+	attacker := 0
+	defender1 := 1
+	defender2 := 2
+	// var attackerId, defender1Id, defender2Id int
+	var turn = 1
 
 	for {
-		for i := 0; i < 2; i++ {
-			// health: Each player's base health
-			// mana: Ignore in the first league; Spend ten mana to cast a spell
-			var health, mana int
-			fmt.Scan(&health, &mana)
-		}
+		var health, mana, enemyHealth, enemyMana int
+		fmt.Scan(&health, &mana)
+		fmt.Scan(&enemyHealth, &enemyMana)
+
 		// entityCount: Amount of heros and monsters you can see
 		var entityCount int
 		fmt.Scan(&entityCount)
 
-		heroes := make(map[int]*Hero)
+		heroes := make([]*Hero, heroesPerPlayer, heroesPerPlayer)
 		monsters := make([]Monster, 0, 20)
+		// dangerousMonsters := make([]Monster, 0, 5)
+		// strategy := DEFAULT
+		alreadyInitHeroes := 0
 
 		for i := 0; i < entityCount; i++ {
 			// id: Unique identifier
@@ -50,35 +70,83 @@ func main() {
 			actor := Actor{id, ttype, x, y, shieldLife, isControlled, health, vx, vy, nearBase, threatFor}
 			if actor.ttype == 1 {
 				hero := &Hero{actor: actor}
-				assignDuty(hero, len(heroes) + 1, baseX, baseY)
-				heroes[actor.id] = hero
+				if alreadyInitHeroes == attacker {
+					// attackerId = hero.actor.id
+					hero.index = attacker
+					heroes[attacker] = hero
+				} else if alreadyInitHeroes == defender1 {
+					hero.index = defender1
+					// defender1Id = hero.actor.id
+					heroes[defender1] = hero
+				} else if alreadyInitHeroes == defender2 {
+					hero.index = defender2
+					// defender2Id = hero.actor.id
+					heroes[defender2] = hero
+				}
+				assignDuty(hero, isBlue)
+				alreadyInitHeroes++
 			}
 			if actor.ttype == 0 {
-				threat := 0
-				if actor.threatFor == 1 {
-					threat += 10
-					if actor.nearBase == 1 {
-						threat += 5
-					}
-				}
-				distanceThreshold := 5000
-				if distance := calculateDistance(baseX, baseY, actor.x, actor.y); distance < distanceThreshold {
-					fmt.Fprintf(os.Stderr, "alert, monster is close %d\n", distance)
-					threat += distanceThreshold - distance
-				}
-				
-				monsters = append(monsters, Monster{actor, threat})
+				distance := calculateDistance(baseX, baseY, actor.x, actor.y)
+
+				monsters = append(monsters, Monster{actor: actor, distanceFromBase: distance})
 			}
 		}
 
-		for i := 0; i < len(monsters); i++ {
-			monster := monsters[i]
-			for _, hero := range heroes {
-				if hero.target == nil || monster.threat > hero.target.threat {
-
-					// fmt.Fprintf(os.Stderr, "hero: %d targeting: %d", hero.actor.id, hero.target.actor.id)
-					hero.target = &monster
+		sort.Slice(monsters, func(i, j int) bool {
+			return monsters[i].distanceFromBase < monsters[j].distanceFromBase
+		})
+		if len(monsters) > 0 {
+			for id, hero := range heroes {
+				if id == attacker {
+					// maybeTarget := monsters[0]
+					// if heroes[defender2].target != nil && heroes[defender2].target.actor.id == maybeTarget.actor.id {
+					// 	if len(monsters) > 1 {
+					// 		maybeTarget = monsters[1]
+					// 	}
+					// } else if hero.target == nil || maybeTarget.distanceFromBase < hero.target.distanceFromBase {
+					// 	hero.target = &maybeTarget
+					// }
+					if mana > 30 && calculateDistance(hero.actor.x, hero.actor.y, enemyBaseX, enemyBaseY) < 8000 && findCloseMonsterDescending(hero.actor, monsters, 1280) != nil {
+						hero.wind(isBlue)
+					} else {
+						hero.patrol()
+					}
+				} else if id == defender1 {
+					if monsters[0].distanceFromBase < 5000 {
+						hero.target = &monsters[0]
+						hero.attack(monsters, "P")
+						continue
+					}
+					oo, i := targetClosestMob(*hero, filterMonstersToArea(monsters, toInt(!isBlue), 1))
+					hero.target = oo
+					if oo != nil {
+						hero.attack(monsters, fmt.Sprintf("R%d", i))
+					} else {
+						hero.moveToDuty()
+					}
+				} else if id == defender2 {
+					if monsters[0].distanceFromBase < 5000 {
+						if countMonstersInBaseDistance(monsters, 3000) > 1 && mana > 20 && (calculateDistanceBetweenActors(hero.actor, monsters[1].actor) < 1280 || calculateDistanceBetweenActors(hero.actor, monsters[0].actor) < 1280) {
+							hero.wind(isBlue)
+						} else {
+							hero.target = &monsters[0]
+							hero.attack(monsters, "P")
+						}
+						continue
+					}
+					oo, i := targetClosestMob(*hero, filterMonstersToArea(monsters, toInt(!isBlue), -1))
+					hero.target = oo
+					if hero.target != nil {
+						hero.attack(monsters, fmt.Sprintf("R%d", i))
+					} else {
+						hero.moveToDuty()
+					}
 				}
+			}
+		} else {
+			for _, hero := range heroes {
+				hero.moveToDuty()
 			}
 		}
 
@@ -86,18 +154,41 @@ func main() {
 
 		// In the first league: MOVE <x> <y> | WAIT; In later leagues: | SPELL <spellParams>;
 
-		fmt.Fprintf(os.Stderr, "number of heroes: %d", len(heroes))
-		fmt.Fprintf(os.Stderr, "number of monsters: %d", len(monsters))
-		fmt.Fprintf(os.Stderr, "%+v\n", heroes)
+		// fmt.Fprintf(os.Stderr, "current strategy: %s", strategy)
+		// fmt.Fprintf(os.Stderr, "number of heroes: %d", len(heroes))
+		// fmt.Fprintf(os.Stderr, "number of monsters: %d", len(monsters))
+		// fmt.Fprintf(os.Stderr, "%+v\n", heroes)
 
-		for _, hero := range heroes {
-			if hero.target != nil {
-				fmt.Println("MOVE ", hero.target.actor.x, " ", hero.target.actor.y)
-			} else {
-				fmt.Println("MOVE ", hero.dutyX, hero.dutyY)
-			}
-		}
-
+		// saviourCount := 0
+		// heroCount := 0
+		// for _, hero := range heroes {
+		// 	if heroCount == -1 {
+		// 	} else {
+		// 		if hero.target != nil {
+		// 			if strategy == PANIC {
+		// 				monsterToMC := dangerousMonsters[0]
+		// 				if saviourCount == 0 && mana >= 10 && len(dangerousMonsters) > 1 && calculateDistance(hero.actor.x, hero.actor.y, monsterToMC.actor.x, monsterToMC.actor.y) < 2200 {
+		// 					fmt.Println("SPELL CONTROL ", monsterToMC.actor.id, 9200, 4400)
+		// 					saviourCount++
+		// 					continue
+		// 				}
+		// 			}
+		// 			point := getOptimalPoint(*hero.target, monsters)
+		// 			fmt.Println("MOVE ", point.x, " ", point.y)
+		// 		} else {
+		// 			if calculateDistance(hero.actor.x, hero.actor.y, hero.dutyY, hero.dutyY) < 300 {
+		// 				if mana > 20 && turn > 5 {
+		// 					if tryToShieldSomeone(heroes) {
+		// 						continue
+		// 					}
+		// 				}
+		// 			}
+		// 			fmt.Println("MOVE ", hero.dutyX, hero.dutyY)
+		// 		}
+		// 	}
+		// 	heroCount++
+		// }
+		turn++
 	}
 }
 
@@ -105,14 +196,20 @@ type Actor struct {
 	id, ttype, x, y, shieldLife, isControlled, health, vx, vy, nearBase, threatFor int
 }
 type Monster struct {
-	actor  Actor
-	threat int
+	actor            Actor
+	distanceFromBase int
 }
 type Hero struct {
-	actor  Actor
-	target *Monster
-	dutyX  int
-	dutyY  int
+	index          int
+	actor          Actor
+	target         *Monster
+	fallbackTarget *Monster
+	dutyX          int
+	dutyY          int
+}
+type Patrol struct {
+	coeff       int
+	isAscending bool
 }
 
 func getAlreadyTargerMonsters(heroes map[int]*Hero) []int {
@@ -132,30 +229,33 @@ func contains(list []int, x int) bool {
 	}
 	return false
 }
-func assignDuty(hero *Hero, position int, baseX int, baseY int) {
-	if baseX > 8815 {
-		if position == 1 {
-			hero.dutyX = 13000
-			hero.dutyY = 7000
-		} else if position == 2 {
-			hero.dutyX = 14000
-			hero.dutyY = 5500
+func assignDuty(hero *Hero, isBlue bool) {
+	if isBlue {
+		if hero.index == 0 {
+			hero.dutyX = enemyBaseX - 5000
+			hero.dutyY = enemyBaseY - 5000
+		} else if hero.index == 1 {
+			hero.dutyX = 6000
+			hero.dutyY = 2500
 		} else {
-			hero.dutyX = 15500
-			hero.dutyY = 4400
+			hero.dutyX = 3500
+			hero.dutyY = 6000
 		}
 	} else {
-		if position == 1 {
-			hero.dutyX = 2200
+		if hero.index == 0 {
+			hero.dutyX = enemyBaseX + 5000
+			hero.dutyY = enemyBaseY + 5000
+		} else if hero.index == 1 {
+			hero.dutyX = 14300
 			hero.dutyY = 4400
-		} else if position == 2 {
-			hero.dutyX = 4000
-			hero.dutyY = 3000
 		} else {
-			hero.dutyX = 4700
-			hero.dutyY = 1500
+			hero.dutyX = 11800
+			hero.dutyY = 7000
 		}
 	}
+}
+func calculateDistanceBetweenActors(actor1 Actor, actor2 Actor) int {
+	return calculateDistance(actor1.x, actor1.y, actor2.x, actor2.y)
 }
 func calculateDistance(p1X int, p1Y int, p2X int, p2Y int) int {
 	first := PowInt(p2X-p1X, 2)
@@ -163,5 +263,180 @@ func calculateDistance(p1X int, p1Y int, p2X int, p2Y int) int {
 	return int(math.Round(math.Sqrt(float64(first) + float64(second))))
 }
 func PowInt(x, y int) int {
-    return int(math.Pow(float64(x), float64(y)))
+	return int(math.Pow(float64(x), float64(y)))
+}
+func tryToShieldSomeone(heroes []*Hero) bool {
+	for id, ally := range heroes {
+		if ally.actor.shieldLife < 1 {
+			fmt.Println("SPELL SHIELD ", id)
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	DEFAULT = "DEFAULT"
+	PANIC   = "PANIC"
+)
+
+func isInArea(x int, y int, ax int, ay int, bx int, by int) bool {
+	// a = upper left
+	if x > ax && x < bx && y > ay && y < by {
+		return true
+	}
+	return false
+}
+func isInDefensiveArea(x int, y int, isBlue bool) bool {
+	var ax, ay, bx, by int
+	if !isBlue {
+		ax = maxX - 7500
+		ay = maxY - 7500
+		bx = maxX - 5000
+		by = maxY
+	} else {
+		ax = 5000
+		ay = 0
+		bx = 7500
+		by = 7500
+	}
+	if isInArea(x, y, ax, ay, bx, by) {
+		return true
+	}
+	if !isBlue {
+		ax = maxX - 7500
+		ay = maxY - 7500
+		bx = maxX
+		by = maxY - 5000
+	} else {
+		ax = 0
+		ay = 5000
+		bx = 7500
+		by = 7500
+	}
+	if isInArea(x, y, ax, ay, bx, by) {
+		return true
+	}
+	return false
+}
+
+type Point struct {
+	x int
+	y int
+}
+
+func getOptimalPoint(target Monster, monsters []Monster) Point {
+	for _, m := range monsters {
+		distance := calculateDistance(target.actor.x, target.actor.y, m.actor.x, m.actor.y)
+		if target.actor.id != m.actor.id && distance < 800 {
+			return Point{x: (target.actor.x + m.actor.x) / 2, y: (target.actor.y + m.actor.y) / 2}
+		}
+	}
+	return Point{target.actor.x, target.actor.y}
+}
+func Abs(x int) int {
+	if x < 0 {
+		return x * -1
+	}
+	return x
+}
+func filterMonstersToArea(monsters []Monster, vectorx int, vectory int) []Monster {
+	result := make([]Monster, 0, len(monsters))
+	for _, m := range monsters {
+		cX := false
+		cY := false
+		if vectorx == 1 {
+			// right
+			cX = m.actor.x > maxX/2
+		} else if vectorx == -1 {
+			cX = m.actor.x < maxX/2
+		}
+		if vectory == 1 {
+			// up
+			cY = m.actor.y < maxY/2
+		} else if vectory == -1 {
+			cY = m.actor.y > maxY/2
+		}
+		if cX && cY {
+			result = append(result, m)
+		}
+	}
+	return result
+}
+func targetClosestMob(hero Hero, monsters []Monster) (*Monster, int) {
+	var target *Monster = nil
+	var targetDistance int
+	var targetRank int
+	count := 0
+	for i, m := range monsters {
+		if target == nil {
+			target = &m
+			targetRank = i
+			targetDistance = calculateDistanceBetweenActors(hero.actor, m.actor)
+		} else {
+			if m.distanceFromBase > 2000 && calculateDistanceBetweenActors(hero.actor, m.actor) < targetDistance {
+				target = &m
+				targetRank = i
+			}
+		}
+		if count > -1 { // TODO fix disabled
+			break
+		}
+		count++
+	}
+	return target, targetRank
+}
+func toInt(b bool) int {
+	if b {
+		return 1
+	} else {
+		return -1
+	}
+}
+func (hero Hero) attack(monsters []Monster, message string) {
+	point := getOptimalPoint(*hero.target, monsters)
+	fmt.Println("MOVE ", point.x, " ", point.y, hero.index, ": ", message)
+}
+func (hero Hero) moveToDuty() {
+	fmt.Println("MOVE ", hero.dutyX, hero.dutyY, hero.index, ": D")
+}
+func (hero Hero) patrol() {
+	if patrolState.isAscending && patrolState.coeff > 4 {
+		patrolState.isAscending = false
+	} else if !patrolState.isAscending && patrolState.coeff < -4 {
+		patrolState.isAscending = true
+	}
+	if patrolState.isAscending {
+		patrolState.coeff++
+	} else {
+		patrolState.coeff--
+	}
+	var xcoeff int
+	if isBlue {
+		xcoeff = Abs(patrolState.coeff)
+	} else {
+		xcoeff = -Abs(patrolState.coeff)
+	}
+	fmt.Println("MOVE ", hero.dutyX+xcoeff*800, hero.dutyY+patrolState.coeff*700, hero.index, "p", patrolState.coeff)
+}
+func (hero Hero) wind(isBlue bool) {
+	fmt.Println("SPELL WIND ", enemyBaseX, enemyBaseY, hero.index)
+}
+func countMonstersInBaseDistance(monsters []Monster, dist int) int {
+	var count int
+	for _, m := range monsters {
+		if m.distanceFromBase < dist {
+			count++
+		}
+	}
+	return count
+}
+func findCloseMonsterDescending(actor Actor, monsters []Monster, distance int) *Monster {
+	for i := len(monsters) - 1; i >= 0; i-- {
+		m := monsters[i]
+		if calculateDistanceBetweenActors(actor, m.actor) < distance {
+			return &m
+		}
+	}
+	return nil
 }
